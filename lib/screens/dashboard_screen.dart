@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../models/plant_data.dart';
@@ -22,15 +23,71 @@ class _DashboardScreenState extends State<DashboardScreen> {
   ScheduleData _schedule = ScheduleData();
   String _lastNotification = '';
 
+  // For saturation notification
+  Timer? _saturationTimer;
+  StreamSubscription<SensorData>? _sensorSub;
+  StreamSubscription<ControlData>? _controlSub;
+
   @override
   void initState() {
     super.initState();
+
+    // Listen for Firebase-pushed notifications (schedule skip, etc.)
     _db.notificationStream.listen((msg) {
       if (msg.isNotEmpty && msg != _lastNotification) {
         _lastNotification = msg;
         _showNotificationSnackbar(msg);
       }
     });
+
+    // Keep local copies of sensor & control data for the saturation check
+    _sensorSub = _db.sensorStream.listen((s) => _sensors = s);
+    _controlSub = _db.controlStream.listen((c) {
+      final wasOn = _controls.manualValveOn;
+      _controls = c;
+      if (c.manualValveOn && !wasOn) {
+        // Valve just turned ON — start repeating timer
+        _startSaturationTimer();
+      } else if (!c.manualValveOn && wasOn) {
+        // Valve turned OFF — cancel timer
+        _saturationTimer?.cancel();
+        _saturationTimer = null;
+      }
+    });
+
+    // Cache schedule so the dashboard card never flashes the default "disabled" state
+    _db.scheduleStream.listen((s) {
+      if (mounted) setState(() => _schedule = s);
+    });
+  }
+
+  void _startSaturationTimer() {
+    _saturationTimer?.cancel();
+    // Check immediately, then every 2 minutes
+    _checkSaturation();
+    _saturationTimer = Timer.periodic(const Duration(minutes: 2), (_) {
+      if (_controls.manualValveOn) {
+        _checkSaturation();
+      } else {
+        _saturationTimer?.cancel();
+        _saturationTimer = null;
+      }
+    });
+  }
+
+  void _checkSaturation() {
+    if (_sensors.moisturePercent >= _controls.expectedMoisturePercent) {
+      _showNotificationSnackbar(
+          '💧 Expected soil moisture value saturated — consider turning off manual watering.');
+    }
+  }
+
+  @override
+  void dispose() {
+    _saturationTimer?.cancel();
+    _sensorSub?.cancel();
+    _controlSub?.cancel();
+    super.dispose();
   }
 
   void _showNotificationSnackbar(String message) {
@@ -160,8 +217,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     builder: (context, snap) {
                       final data = snap.data ?? SensorData();
                       return WeatherBanner(
-                        temperature: data.temperatureAmbient,
+                        temperature: data.temperature,
                         humidity: data.humidity,
+                        isRaining: data.isRaining,
                       );
                     },
                   ),
@@ -183,7 +241,7 @@ class _DashboardScreenState extends State<DashboardScreen> {
                         children: [
                           SensorCard(
                             label: 'AIR TEMP',
-                            value: data.temperatureAmbient.toStringAsFixed(1),
+                            value: data.temperature.toStringAsFixed(1),
                             unit: '°C',
                             icon: Icons.thermostat_rounded,
                             color: const Color(0xFFFF6B35),
@@ -198,12 +256,12 @@ class _DashboardScreenState extends State<DashboardScreen> {
                             secondaryColor: const Color(0xFF00D2FF),
                           ),
                           SensorCard(
-                            label: 'SOIL TEMP',
-                            value: data.temperatureSoil.toStringAsFixed(1),
-                            unit: '°C',
-                            icon: Icons.eco_rounded,
-                            color: const Color(0xFF9B59B6),
-                            secondaryColor: const Color(0xFFE91E8C),
+                            label: 'RAINING',
+                            value: data.isRaining ? 'YES' : 'NO',
+                            unit: '',
+                            icon: Icons.umbrella_rounded,
+                            color: const Color(0xFF3A7BD5),
+                            secondaryColor: const Color(0xFF00D2FF),
                           ),
                           SensorCard(
                             label: 'MOISTURE',
@@ -245,6 +303,8 @@ class _DashboardScreenState extends State<DashboardScreen> {
                     stream: _db.controlStream,
                     builder: (context, snap) {
                       final controls = snap.data ?? ControlData();
+                      // Determine valve indicator: use actual valveState reported by ESP32
+                      final valveActuallyOn = controls.valveState;
                       return Container(
                         padding: const EdgeInsets.all(20),
                         decoration: BoxDecoration(
@@ -306,15 +366,63 @@ class _DashboardScreenState extends State<DashboardScreen> {
                                                 fontSize: 14,
                                                 fontWeight: FontWeight.w600,
                                                 color: Colors.white)),
-                                        Text(
-                                          controls.manualValveOn
-                                              ? '💧 Valve is OPEN'
-                                              : 'Valve is closed',
-                                          style: TextStyle(
-                                              fontSize: 11,
-                                              color: controls.manualValveOn
-                                                  ? const Color(0xFF6BCB77)
-                                                  : Colors.white38),
+                                        const SizedBox(height: 4),
+                                        // Valve ON/OFF indicator badge
+                                        Row(
+                                          children: [
+                                            Container(
+                                              padding: const EdgeInsets.symmetric(
+                                                  horizontal: 8, vertical: 2),
+                                              decoration: BoxDecoration(
+                                                color: valveActuallyOn
+                                                    ? const Color(0xFF6BCB77)
+                                                        .withOpacity(0.2)
+                                                    : Colors.red
+                                                        .withOpacity(0.15),
+                                                borderRadius:
+                                                    BorderRadius.circular(6),
+                                                border: Border.all(
+                                                  color: valveActuallyOn
+                                                      ? const Color(0xFF6BCB77)
+                                                          .withOpacity(0.6)
+                                                      : Colors.red
+                                                          .withOpacity(0.4),
+                                                  width: 1,
+                                                ),
+                                              ),
+                                              child: Row(
+                                                mainAxisSize: MainAxisSize.min,
+                                                children: [
+                                                  Container(
+                                                    width: 6,
+                                                    height: 6,
+                                                    decoration: BoxDecoration(
+                                                      color: valveActuallyOn
+                                                          ? const Color(
+                                                              0xFF6BCB77)
+                                                          : Colors.red,
+                                                      shape: BoxShape.circle,
+                                                    ),
+                                                  ),
+                                                  const SizedBox(width: 4),
+                                                  Text(
+                                                    valveActuallyOn
+                                                        ? 'Valve ON'
+                                                        : 'Valve OFF',
+                                                    style: TextStyle(
+                                                      fontSize: 10,
+                                                      fontWeight:
+                                                          FontWeight.w600,
+                                                      color: valveActuallyOn
+                                                          ? const Color(
+                                                              0xFF6BCB77)
+                                                          : Colors.red,
+                                                    ),
+                                                  ),
+                                                ],
+                                              ),
+                                            ),
+                                          ],
                                         ),
                                       ],
                                     ),
@@ -405,7 +513,9 @@ class _DashboardScreenState extends State<DashboardScreen> {
                   StreamBuilder<ScheduleData>(
                     stream: _db.scheduleStream,
                     builder: (context, snap) {
-                      final schedule = snap.data ?? ScheduleData();
+                      // Use cached _schedule as fallback — prevents the card from
+                      // briefly flashing "Schedule disabled" on stream reconnect
+                      final schedule = snap.data ?? _schedule;
                       return GestureDetector(
                         onTap: () => Navigator.push(
                           context,

@@ -55,3 +55,28 @@ To export a universal "fat" APK that runs on all Android devices:
 flutter build apk
 ```
 The final binary will be available at: `build/app/outputs/flutter-apk/app-release.apk`
+
+## 🔌 Hardware Setup (Physical Build)
+
+The physical system uses the following components:
+
+- **Microcontroller:** NodeMCU ESP32S
+- **Soil Moisture Sensor:** Capacitive Soil Moisture Sensor v1.2
+- **Ambient Temp & Humidity Sensor:** DHT11
+- **Soil Temperature Sensor:** Waterproof DS18B20
+- **Display:** 16x2 LCD Display with I2C Interface Module
+- **Relay:** 5V 1-Channel Relay Module (with Optocoupler isolation)
+- **Water Valve:** 12V DC Solenoid Water Valve (Normally Closed)
+- **Power Supply:**
+  - **12V DC Power Adapter/Battery:** Provides enough power for the solenoid valve.
+  - **LM2596 DC-DC Buck Converter:** Steps down the 12V supply to 5V to safely power the ESP32 (via the VIN pin) and the Relay Module.
+- **Miscellaneous:** Breadboard, Jumper Wires, and a 4.7k Ohm Resistor (required as a pull-up resistor for the DS18B20 sensor).
+
+## 💻 How to Simulate the Device (Wokwi)
+
+Before building the physical hardware, you can test and simulate the ESP32 code online using the [Wokwi Simulator](https://wokwi.com/).
+
+1. Start a new ESP32 project on Wokwi.
+2. Click the **+** button to add the supported components: `DHT11`, `DS18B20`, `16x2 I2C LCD`, and a `Relay` module.
+3. **Simulating Soil Moisture:** Since you cannot simulate wet soil in Wokwi, add a **Potentiometer**. Connect it to an analog pin and twist the knob to simulate changing soil moisture levels.
+4. **Internet Connectivity:** Wokwi allows the virtual ESP32 to connect to the actual internet. You can configure your WiFi credentials in the simulation to connect directly to your live Firebase database!

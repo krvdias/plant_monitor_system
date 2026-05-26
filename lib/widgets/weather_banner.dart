@@ -4,16 +4,18 @@ import '../models/plant_data.dart';
 class WeatherBanner extends StatelessWidget {
   final double temperature;
   final double humidity;
+  final bool isRaining;
 
   const WeatherBanner({
     super.key,
     required this.temperature,
     required this.humidity,
+    this.isRaining = false,
   });
 
   @override
   Widget build(BuildContext context) {
-    final condition = predictWeather(temperature, humidity);
+    final condition = predictWeather(temperature, humidity, isRaining: isRaining);
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(20),

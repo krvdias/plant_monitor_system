@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../services/database_service.dart';
 import '../models/plant_data.dart';
@@ -13,13 +14,32 @@ class _ScheduleScreenState extends State<ScheduleScreen> {
   final _db = DatabaseService();
   ScheduleData _schedule = ScheduleData();
   bool _isLoading = false;
+  bool _initialLoaded = false; // only auto-sync from Firebase until first user edit
+  StreamSubscription<ScheduleData>? _scheduleSub;
 
   @override
   void initState() {
     super.initState();
-    _db.scheduleStream.first.then((s) {
-      if (mounted) setState(() => _schedule = s);
+    // Subscribe to the live Firebase stream so _schedule always reflects reality
+    _scheduleSub = _db.scheduleStream.listen((s) {
+      if (mounted && !_initialLoaded) {
+        // Auto-sync until user makes their first change
+        setState(() {
+          _schedule = s;
+          _initialLoaded = true;
+        });
+      } else if (mounted && _initialLoaded) {
+        // After user edits, still reflect external changes (e.g. ESP32 writes)
+        // but don't override unsaved user edits — we only update isActive from stream
+        // (commented out intentionally to preserve mid-edit state)
+      }
     });
+  }
+
+  @override
+  void dispose() {
+    _scheduleSub?.cancel();
+    super.dispose();
   }
 
   Future<void> _pickStartTime() async {
